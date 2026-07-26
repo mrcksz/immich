@@ -12,8 +12,6 @@ import 'package:immich_mobile/presentation/actions/lock.action.dart';
 import 'package:immich_mobile/presentation/actions/stack.action.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/bulk_tag_assets_action_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/download_action_button.widget.dart';
-import 'package:immich_mobile/presentation/widgets/action_buttons/edit_date_time_action_button.widget.dart';
-import 'package:immich_mobile/presentation/widgets/action_buttons/edit_location_action_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/share_action_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/share_link_action_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/upload_action_button.widget.dart';
@@ -91,8 +89,8 @@ class _GeneralBottomSheetState extends ConsumerState<GeneralBottomSheet> {
           const ActionColumnButton(action: FavoriteAction(source: .timeline)),
           const ActionColumnButton(action: ArchiveAction(source: .timeline)),
           if (tagsEnabled) const BulkTagAssetsActionButton(source: ActionSource.timeline),
-          const EditDateTimeActionButton(source: ActionSource.timeline),
-          const EditLocationActionButton(source: ActionSource.timeline),
+          const ActionColumnButton(action: EditDateTimeAction(source: .timeline)),
+          const ActionColumnButton(action: EditLocationAction(source: .timeline)),
           const ActionColumnButton(action: LockAction(source: .timeline)),
           const ActionColumnButton(action: StackAction(source: .timeline)),
         ],
