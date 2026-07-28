@@ -207,6 +207,20 @@ enum class PlatformAssetPlaybackStyle(val raw: Int) {
   }
 }
 
+enum class CloudIdErrorKind(val raw: Int) {
+  NOT_FOUND(0),
+  AMBIGUOUS(1),
+  INCOMPLETE(2),
+  UNSUPPORTED(3),
+  UNKNOWN(4);
+
+  companion object {
+    fun ofRaw(raw: Int): CloudIdErrorKind? {
+      return values().firstOrNull { it.raw == raw }
+    }
+  }
+}
+
 /** Generated class from Pigeon that represents data sent in messages. */
 data class PlatformAsset (
   val id: String,
@@ -435,7 +449,8 @@ data class HashResult (
 data class CloudIdResult (
   val assetId: String,
   val error: String? = null,
-  val cloudId: String? = null
+  val cloudId: String? = null,
+  val errorKind: CloudIdErrorKind? = null
 )
  {
   companion object {
@@ -443,7 +458,8 @@ data class CloudIdResult (
       val assetId = pigeonVar_list[0] as String
       val error = pigeonVar_list[1] as String?
       val cloudId = pigeonVar_list[2] as String?
-      return CloudIdResult(assetId, error, cloudId)
+      val errorKind = pigeonVar_list[3] as CloudIdErrorKind?
+      return CloudIdResult(assetId, error, cloudId, errorKind)
     }
   }
   fun toList(): List<Any?> {
@@ -451,6 +467,7 @@ data class CloudIdResult (
       assetId,
       error,
       cloudId,
+      errorKind,
     )
   }
   override fun equals(other: Any?): Boolean {
@@ -461,7 +478,7 @@ data class CloudIdResult (
       return true
     }
     val other = other as CloudIdResult
-    return MessagesPigeonUtils.deepEquals(this.assetId, other.assetId) && MessagesPigeonUtils.deepEquals(this.error, other.error) && MessagesPigeonUtils.deepEquals(this.cloudId, other.cloudId)
+    return MessagesPigeonUtils.deepEquals(this.assetId, other.assetId) && MessagesPigeonUtils.deepEquals(this.error, other.error) && MessagesPigeonUtils.deepEquals(this.cloudId, other.cloudId) && MessagesPigeonUtils.deepEquals(this.errorKind, other.errorKind)
   }
 
   override fun hashCode(): Int {
@@ -469,6 +486,7 @@ data class CloudIdResult (
     result = 31 * result + MessagesPigeonUtils.deepHash(this.assetId)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.error)
     result = 31 * result + MessagesPigeonUtils.deepHash(this.cloudId)
+    result = 31 * result + MessagesPigeonUtils.deepHash(this.errorKind)
     return result
   }
 }
@@ -481,26 +499,31 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         }
       }
       130.toByte() -> {
-        return (readValue(buffer) as? List<Any?>)?.let {
-          PlatformAsset.fromList(it)
+        return (readValue(buffer) as Long?)?.let {
+          CloudIdErrorKind.ofRaw(it.toInt())
         }
       }
       131.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          PlatformAlbum.fromList(it)
+          PlatformAsset.fromList(it)
         }
       }
       132.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          SyncDelta.fromList(it)
+          PlatformAlbum.fromList(it)
         }
       }
       133.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
-          HashResult.fromList(it)
+          SyncDelta.fromList(it)
         }
       }
       134.toByte() -> {
+        return (readValue(buffer) as? List<Any?>)?.let {
+          HashResult.fromList(it)
+        }
+      }
+      135.toByte() -> {
         return (readValue(buffer) as? List<Any?>)?.let {
           CloudIdResult.fromList(it)
         }
@@ -514,24 +537,28 @@ private open class MessagesPigeonCodec : StandardMessageCodec() {
         stream.write(129)
         writeValue(stream, value.raw.toLong())
       }
-      is PlatformAsset -> {
+      is CloudIdErrorKind -> {
         stream.write(130)
-        writeValue(stream, value.toList())
+        writeValue(stream, value.raw.toLong())
       }
-      is PlatformAlbum -> {
+      is PlatformAsset -> {
         stream.write(131)
         writeValue(stream, value.toList())
       }
-      is SyncDelta -> {
+      is PlatformAlbum -> {
         stream.write(132)
         writeValue(stream, value.toList())
       }
-      is HashResult -> {
+      is SyncDelta -> {
         stream.write(133)
         writeValue(stream, value.toList())
       }
-      is CloudIdResult -> {
+      is HashResult -> {
         stream.write(134)
+        writeValue(stream, value.toList())
+      }
+      is CloudIdResult -> {
+        stream.write(135)
         writeValue(stream, value.toList())
       }
       else -> super.writeValue(stream, value)

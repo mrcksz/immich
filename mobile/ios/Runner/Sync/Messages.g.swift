@@ -183,6 +183,14 @@ enum PlatformAssetPlaybackStyle: Int {
   case videoLooping = 5
 }
 
+enum CloudIdErrorKind: Int {
+  case notFound = 0
+  case ambiguous = 1
+  case incomplete = 2
+  case unsupported = 3
+  case unknown = 4
+}
+
 /// Generated class from Pigeon that represents data sent in messages.
 struct PlatformAsset: Hashable {
   var id: String
@@ -422,6 +430,7 @@ struct CloudIdResult: Hashable {
   var assetId: String
   var error: String? = nil
   var cloudId: String? = nil
+  var errorKind: CloudIdErrorKind? = nil
 
 
   // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -429,11 +438,13 @@ struct CloudIdResult: Hashable {
     let assetId = pigeonVar_list[0] as! String
     let error: String? = nilOrValue(pigeonVar_list[1])
     let cloudId: String? = nilOrValue(pigeonVar_list[2])
+    let errorKind: CloudIdErrorKind? = nilOrValue(pigeonVar_list[3])
 
     return CloudIdResult(
       assetId: assetId,
       error: error,
-      cloudId: cloudId
+      cloudId: cloudId,
+      errorKind: errorKind
     )
   }
   func toList() -> [Any?] {
@@ -441,13 +452,14 @@ struct CloudIdResult: Hashable {
       assetId,
       error,
       cloudId,
+      errorKind,
     ]
   }
   static func == (lhs: CloudIdResult, rhs: CloudIdResult) -> Bool {
     if Swift.type(of: lhs) != Swift.type(of: rhs) {
       return false
     }
-    return deepEqualsMessages(lhs.assetId, rhs.assetId) && deepEqualsMessages(lhs.error, rhs.error) && deepEqualsMessages(lhs.cloudId, rhs.cloudId)
+    return deepEqualsMessages(lhs.assetId, rhs.assetId) && deepEqualsMessages(lhs.error, rhs.error) && deepEqualsMessages(lhs.cloudId, rhs.cloudId) && deepEqualsMessages(lhs.errorKind, rhs.errorKind)
   }
 
   func hash(into hasher: inout Hasher) {
@@ -455,6 +467,7 @@ struct CloudIdResult: Hashable {
     deepHashMessages(value: assetId, hasher: &hasher)
     deepHashMessages(value: error, hasher: &hasher)
     deepHashMessages(value: cloudId, hasher: &hasher)
+    deepHashMessages(value: errorKind, hasher: &hasher)
   }
 }
 
@@ -468,14 +481,20 @@ private class MessagesPigeonCodecReader: FlutterStandardReader {
       }
       return nil
     case 130:
-      return PlatformAsset.fromList(self.readValue() as! [Any?])
+      let enumResultAsInt: Int? = nilOrValue(self.readValue() as! Int?)
+      if let enumResultAsInt = enumResultAsInt {
+        return CloudIdErrorKind(rawValue: enumResultAsInt)
+      }
+      return nil
     case 131:
-      return PlatformAlbum.fromList(self.readValue() as! [Any?])
+      return PlatformAsset.fromList(self.readValue() as! [Any?])
     case 132:
-      return SyncDelta.fromList(self.readValue() as! [Any?])
+      return PlatformAlbum.fromList(self.readValue() as! [Any?])
     case 133:
-      return HashResult.fromList(self.readValue() as! [Any?])
+      return SyncDelta.fromList(self.readValue() as! [Any?])
     case 134:
+      return HashResult.fromList(self.readValue() as! [Any?])
+    case 135:
       return CloudIdResult.fromList(self.readValue() as! [Any?])
     default:
       return super.readValue(ofType: type)
@@ -488,20 +507,23 @@ private class MessagesPigeonCodecWriter: FlutterStandardWriter {
     if let value = value as? PlatformAssetPlaybackStyle {
       super.writeByte(129)
       super.writeValue(value.rawValue)
-    } else if let value = value as? PlatformAsset {
+    } else if let value = value as? CloudIdErrorKind {
       super.writeByte(130)
-      super.writeValue(value.toList())
-    } else if let value = value as? PlatformAlbum {
+      super.writeValue(value.rawValue)
+    } else if let value = value as? PlatformAsset {
       super.writeByte(131)
       super.writeValue(value.toList())
-    } else if let value = value as? SyncDelta {
+    } else if let value = value as? PlatformAlbum {
       super.writeByte(132)
       super.writeValue(value.toList())
-    } else if let value = value as? HashResult {
+    } else if let value = value as? SyncDelta {
       super.writeByte(133)
       super.writeValue(value.toList())
-    } else if let value = value as? CloudIdResult {
+    } else if let value = value as? HashResult {
       super.writeByte(134)
+      super.writeValue(value.toList())
+    } else if let value = value as? CloudIdResult {
+      super.writeByte(135)
       super.writeValue(value.toList())
     } else {
       super.writeValue(value)
