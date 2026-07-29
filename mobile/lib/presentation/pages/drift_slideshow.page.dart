@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/enums.dart';
+import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/config/slideshow_config.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
@@ -34,17 +35,20 @@ class DriftSlideshowPage extends ConsumerStatefulWidget {
   ConsumerState<DriftSlideshowPage> createState() => _DriftSlideshowPageState();
 }
 
-class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with SingleTickerProviderStateMixin {
+class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const double _kenBurnsZoom = 0.1;
 
   late SlideshowConfig _config;
   late final PageController _pageController;
   late final Stopwatch _stopwatch;
-  late Timer _timer;
+  Timer? _timer;
   late int _index;
   late int _nextIndex;
   bool _paused = false;
   bool _showAppBar = false;
+  String? _timerHeroTag;
+  Duration _lastVideoPosition = Duration.zero;
 
   late final AnimationController _crossfadeController;
   late final Animation<double> _crossfadeOpacity;
@@ -63,9 +67,10 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
     _crossfadeController = AnimationController(vsync: this, duration: Durations.extralong2);
     _crossfadeOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(_crossfadeController);
     _stopwatch = Stopwatch();
-    _createTimer();
+    _startTimer(widget.timeline.getAssetSafe(_index));
     _updateNextIndex();
     ref.listenManual(appConfigProvider.select((s) => s.slideshow), _onConfigChanged);
+    WidgetsBinding.instance.addObserver(this);
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
     unawaited(WakelockPlus.enable());
@@ -79,7 +84,8 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
 
   @override
   dispose() {
-    _timer.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
     _stopwatch.stop();
     _pageController.dispose();
     _crossfadeController.dispose();
@@ -88,13 +94,26 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || _paused) {
+      return;
+    }
+
+    final asset = widget.timeline.getAssetSafe(_index);
+    if (asset != null && !asset.isImage) {
+      _startTimer(asset);
+    }
+  }
+
   void _play() {
     final asset = widget.timeline.getAssetSafe(_index)!;
 
     if (asset.isImage) {
-      _createTimer();
+      _startTimer(asset);
     } else if (ref.read(videoPlayerProvider(asset.heroTag)).status == VideoPlaybackStatus.paused) {
       ref.read(videoPlayerProvider(asset.heroTag).notifier).play();
+      _startTimer(asset);
     } else {
       _nextPage();
     }
@@ -107,7 +126,7 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
   }
 
   void _pause() {
-    _timer.cancel();
+    _timer?.cancel();
     _stopwatch.stop();
 
     final asset = widget.timeline.getAssetSafe(_index)!;
@@ -131,9 +150,8 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
     _updateNextIndex();
 
     final asset = widget.timeline.getAssetSafe(_index);
-    if (durationChanged && !_paused && asset?.isImage == true) {
-      _timer.cancel();
-      _createTimer();
+    if (durationChanged && !_paused && asset != null) {
+      _startTimer(asset);
     }
 
     setState(() {});
@@ -146,16 +164,32 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
       SlideshowDirection.shuffle => widget.timeline.getIndex(widget.timeline.getRandomAsset().heroTag)!,
     };
 
-    if (!widget.timeline.hasRange(_nextIndex, 1)) {
+    if (_nextIndex >= 0 && _nextIndex < widget.timeline.totalAssets && !widget.timeline.hasRange(_nextIndex, 1)) {
       widget.timeline.preloadAssets(_nextIndex);
     }
   }
 
   void _nextPage() async {
-    if (_nextIndex < 0 || _nextIndex >= widget.timeline.totalAssets) {
+    // everything is gone; stop like the repeat-off end, with nothing pending
+    if (widget.timeline.totalAssets == 0) {
+      setState(() {
+        _paused = true;
+      });
+      return;
+    }
+
+    final target = _nextIndex;
+    if (target < 0 || target >= widget.timeline.totalAssets) {
       if (_config.repeat) {
         final wrapped = _config.direction == SlideshowDirection.forward ? 0 : widget.timeline.totalAssets - 1;
         await widget.timeline.preloadAssets(wrapped);
+        if (!mounted) {
+          return;
+        }
+        if (wrapped == _index) {
+          _stayOnSlide();
+          return;
+        }
         _pageController.jumpToPage(wrapped);
       } else {
         setState(() {
@@ -165,11 +199,47 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
       return;
     }
 
-    if (!widget.timeline.hasRange(_nextIndex, 1)) {
-      await widget.timeline.preloadAssets(_nextIndex);
+    if (target == _index) {
+      _stayOnSlide();
+      return;
     }
 
-    _crossFadeToPage(_nextIndex);
+    if (!widget.timeline.hasRange(target, 1)) {
+      await widget.timeline.preloadAssets(target);
+      if (!mounted) {
+        return;
+      }
+    }
+
+    _crossFadeToPage(target);
+  }
+
+  // a move that lands back on the current slide fires no page event, so do what
+  // _pageChanged would have; a completed video cannot wait on the timer, it has
+  // to keep moving or stop
+  void _stayOnSlide() {
+    _updateNextIndex();
+
+    final asset = widget.timeline.getAssetSafe(_index);
+    if (asset != null && !asset.isImage) {
+      final playerState = ref.read(videoPlayerProvider(asset.heroTag));
+      final completed = playerState.status == VideoPlaybackStatus.completed && playerState.position > Duration.zero;
+      if (completed) {
+        if (_nextIndex != _index && _nextIndex >= 0 && _nextIndex < widget.timeline.totalAssets) {
+          _nextPage();
+        } else if (_config.repeat) {
+          ref.read(videoPlayerProvider(asset.heroTag).notifier).restart();
+          _startTimer(asset);
+        } else {
+          setState(() {
+            _paused = true;
+          });
+        }
+        return;
+      }
+    }
+
+    _startTimer(asset);
   }
 
   void _crossFadeToPage(int page) {
@@ -234,14 +304,57 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
     );
   }
 
-  void _createTimer() {
-    _timer = Timer(Duration(milliseconds: _config.duration * 1000 - _stopwatch.elapsedMilliseconds), () {
+  void _startTimer(BaseAsset? asset) {
+    _timer?.cancel();
+    _timerHeroTag = asset?.heroTag;
+
+    if (asset == null || asset.isImage) {
+      _timer = Timer(Duration(milliseconds: _config.duration * 1000 - _stopwatch.elapsedMilliseconds), _onTimer);
+      _stopwatch.start();
+    } else {
+      _lastVideoPosition = ref.read(videoPlayerProvider(asset.heroTag)).position;
+      _timer = Timer(Duration(seconds: _config.duration), _onTimer);
+    }
+  }
+
+  void _onTimer() {
+    if (!mounted || _paused) {
+      return;
+    }
+
+    final asset = widget.timeline.getAssetSafe(_index);
+    if (asset?.heroTag != _timerHeroTag) {
+      // the slide changed under us (timeline reload); adopt what is here and stay armed
+      _stopwatch.stop();
+      _stopwatch.reset();
+      _startTimer(asset);
+      return;
+    }
+
+    if (asset == null || asset.isImage) {
       _stopwatch.stop();
       _stopwatch.reset();
       _nextPage();
-    });
+      return;
+    }
 
-    _stopwatch.start();
+    final playerState = ref.read(videoPlayerProvider(asset.heroTag));
+    final completed = playerState.status == VideoPlaybackStatus.completed && playerState.position > Duration.zero;
+    final stalled = playerState.position == _lastVideoPosition;
+    // the viewer pauses playback while the app is backgrounded and resumes on return
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    final backgrounded =
+        lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.detached;
+
+    // advance past a video that made no playback progress within one slide duration
+    if (!completed && stalled && !backgrounded) {
+      _nextPage();
+      return;
+    }
+
+    _startTimer(asset);
   }
 
   void _pageChanged(int page) {
@@ -256,12 +369,12 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
       }
     });
 
-    _timer.cancel();
+    _timer?.cancel();
     _stopwatch.stop();
     _stopwatch.reset();
 
-    if (!_paused && asset.isImage) {
-      _createTimer();
+    if (!_paused) {
+      _startTimer(asset);
     }
 
     _updateNextIndex();
@@ -376,7 +489,12 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage> with Si
       final position = ref.read(videoPlayerProvider(asset.heroTag)).position;
 
       if (status == VideoPlaybackStatus.completed && isCurrent && position.inMicroseconds > 0) {
-        _nextPage();
+        // advancing from inside build trips the setState-during-build assert
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_paused && _index == index) {
+            _nextPage();
+          }
+        });
       } else if (status == VideoPlaybackStatus.playing) {
         ref.read(videoPlayerProvider(asset.heroTag).notifier).setLoop(false);
       }
