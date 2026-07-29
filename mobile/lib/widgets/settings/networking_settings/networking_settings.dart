@@ -44,6 +44,10 @@ class NetworkingSettings extends HookConsumerWidget {
                   onPressed: () async {
                     final isGrant = await ref.read(networkProvider.notifier).requestWifiReadPermission();
 
+                    if (!context.mounted) {
+                      return;
+                    }
+
                     Navigator.pop(context, isGrant);
                   },
                   child: Text("grant_permission".tr()),
@@ -52,6 +56,10 @@ class NetworkingSettings extends HookConsumerWidget {
             );
           },
         );
+      }
+
+      if (!context.mounted) {
+        return;
       }
 
       if (!hasLocationAlways) {
@@ -65,6 +73,10 @@ class NetworkingSettings extends HookConsumerWidget {
                 TextButton(
                   onPressed: () async {
                     final isGrant = await ref.read(networkProvider.notifier).requestWifiReadBackgroundPermission();
+
+                    if (!context.mounted) {
+                      return;
+                    }
 
                     Navigator.pop(context, isGrant);
                   },

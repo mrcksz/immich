@@ -141,6 +141,10 @@ class AdvancedSettings extends HookConsumerWidget {
           try {
             clearedBytes = await remoteImageApi.clearCache();
           } catch (e) {
+            if (!context.mounted) {
+              return;
+            }
+
             context.scaffoldMessenger.showSnackBar(
               SnackBar(
                 duration: const Duration(seconds: 2),
@@ -153,7 +157,7 @@ class AdvancedSettings extends HookConsumerWidget {
             return;
           }
 
-          if (clearedBytes < 0) {
+          if (clearedBytes < 0 || !context.mounted) {
             return;
           }
 

@@ -146,7 +146,7 @@ class _AddActionButtonState extends ConsumerState<AddActionButton> {
 
     final result = await ref.read(actionProvider.notifier).addToAlbum(ActionSource.viewer, album);
 
-    if (!context.mounted) {
+    if (!mounted) {
       return;
     }
 
@@ -177,7 +177,7 @@ class _AddActionButtonState extends ConsumerState<AddActionButton> {
       );
     }
 
-    if (!context.mounted) {
+    if (!mounted) {
       return;
     }
     await Navigator.of(context).maybePop();

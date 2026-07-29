@@ -106,6 +106,10 @@ class DriftSearchPage extends HookConsumerWidget {
       }
 
       Future.microtask(() {
+        if (!context.mounted) {
+          return;
+        }
+
         textSearchController.clear();
         peopleCurrentFilterWidget.value = null;
         dateRangeCurrentFilterWidget.value = null;

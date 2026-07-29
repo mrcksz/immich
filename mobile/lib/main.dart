@@ -24,13 +24,13 @@ import 'package:immich_mobile/pages/common/splash_screen.page.dart';
 import 'package:immich_mobile/platform/background_worker_lock_api.g.dart';
 import 'package:immich_mobile/providers/app_life_cycle.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/share_intent_upload.provider.dart';
-import 'package:immich_mobile/providers/view_intent/view_intent_handler.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
-import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/locale_provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
 import 'package:immich_mobile/providers/theme.provider.dart';
+import 'package:immich_mobile/providers/view_intent/view_intent_handler.provider.dart';
 import 'package:immich_mobile/routing/app_navigation_observer.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/services/deep_link.service.dart';
@@ -152,20 +152,9 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
 
   Future<void> initApp() async {
     WidgetsBinding.instance.addObserver(this);
-
     // Draw the app from edge to edge
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
-
-    // Sets the navigation bar color
-    SystemUiOverlayStyle overlayStyle = const SystemUiOverlayStyle(systemNavigationBarColor: Colors.transparent);
-    if (Platform.isAndroid) {
-      // Android 8 does not support transparent app bars
-      final info = await DeviceInfoPlugin().androidInfo;
-      if (info.version.sdkInt <= 26) {
-        overlayStyle = context.isDarkTheme ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light;
-      }
-    }
-    SystemChrome.setSystemUIOverlayStyle(overlayStyle);
+    await _setNavigationBarColor();
 
     await FlutterLocalNotificationsPlugin().initialize(
       const InitializationSettings(
@@ -173,6 +162,22 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
         iOS: DarwinInitializationSettings(),
       ),
     );
+  }
+
+  Future<void> _setNavigationBarColor() async {
+    SystemUiOverlayStyle overlayStyle = const SystemUiOverlayStyle(systemNavigationBarColor: Colors.transparent);
+    if (Platform.isAndroid) {
+      // Android 8 does not support transparent app bars
+      final info = await DeviceInfoPlugin().androidInfo;
+      if (!mounted) {
+        return;
+      }
+
+      if (info.version.sdkInt <= 26) {
+        overlayStyle = context.isDarkTheme ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light;
+      }
+    }
+    SystemChrome.setSystemUIOverlayStyle(overlayStyle);
   }
 
   Future<DeepLink> _deepLinkBuilder(PlatformDeepLink deepLink) async {
