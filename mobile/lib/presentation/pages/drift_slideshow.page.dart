@@ -9,7 +9,9 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/config/slideshow_config.dart';
+import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
+import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/scroll_extensions.dart';
 import 'package:immich_mobile/extensions/translate_extensions.dart';
@@ -47,8 +49,9 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
   late int _nextIndex;
   bool _paused = false;
   bool _showAppBar = false;
-  String? _timerHeroTag;
+  StreamSubscription<TimelineReloadEvent>? _reloadSubscription;
   Duration _lastVideoPosition = Duration.zero;
+  String? _armedHeroTag;
 
   late final AnimationController _crossfadeController;
   late final Animation<double> _crossfadeOpacity;
@@ -70,6 +73,7 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
     _startTimer(widget.timeline.getAssetSafe(_index));
     _updateNextIndex();
     ref.listenManual(appConfigProvider.select((s) => s.slideshow), _onConfigChanged);
+    _reloadSubscription = EventStream.shared.listen<TimelineReloadEvent>((_) => _onTimelineReload());
     WidgetsBinding.instance.addObserver(this);
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
@@ -85,6 +89,7 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
   @override
   dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _reloadSubscription?.cancel();
     _timer?.cancel();
     _stopwatch.stop();
     _pageController.dispose();
@@ -170,79 +175,52 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
   }
 
   void _nextPage() async {
-    // everything is gone; stop like the repeat-off end, with nothing pending
-    if (widget.timeline.totalAssets == 0) {
-      setState(() {
-        _paused = true;
-      });
-      return;
-    }
-
+    // captured: the preload await must not re-read a re-rolled target
     final target = _nextIndex;
+    // a swipe during the await settles the show elsewhere; the stale advance must not fire
+    final expectedIndex = _index;
     if (target < 0 || target >= widget.timeline.totalAssets) {
-      if (_config.repeat) {
-        final wrapped = _config.direction == SlideshowDirection.forward ? 0 : widget.timeline.totalAssets - 1;
-        await widget.timeline.preloadAssets(wrapped);
-        if (!mounted) {
-          return;
-        }
-        if (wrapped == _index) {
-          _stayOnSlide();
-          return;
-        }
-        _pageController.jumpToPage(wrapped);
-      } else {
+      // nowhere to go: an emptied timeline or the no-repeat end stops the show
+      if (widget.timeline.totalAssets == 0 || !_config.repeat) {
         setState(() {
           _paused = true;
         });
+        return;
       }
-      return;
-    }
 
-    if (target == _index) {
-      _stayOnSlide();
+      final wrapped = _config.direction == SlideshowDirection.forward ? 0 : widget.timeline.totalAssets - 1;
+      if (wrapped != _index) {
+        await widget.timeline.preloadAssets(wrapped);
+      }
+      if (_index != expectedIndex) {
+        return;
+      }
+      _crossFadeToPage(wrapped);
       return;
     }
 
     if (!widget.timeline.hasRange(target, 1)) {
       await widget.timeline.preloadAssets(target);
-      if (!mounted) {
-        return;
-      }
+    }
+
+    if (_index != expectedIndex) {
+      return;
     }
 
     _crossFadeToPage(target);
   }
 
-  // a move that lands back on the current slide fires no page event, so do what
-  // _pageChanged would have; a completed video cannot wait on the timer, it has
-  // to keep moving or stop
-  void _stayOnSlide() {
-    _updateNextIndex();
-
-    final asset = widget.timeline.getAssetSafe(_index);
-    if (asset != null && !asset.isImage) {
-      final playerState = ref.read(videoPlayerProvider(asset.heroTag));
-      final completed = playerState.status == VideoPlaybackStatus.completed && playerState.position > Duration.zero;
-      if (completed) {
-        if (_nextIndex != _index && _nextIndex >= 0 && _nextIndex < widget.timeline.totalAssets) {
-          _nextPage();
-        } else if (_config.repeat) {
-          ref.read(videoPlayerProvider(asset.heroTag).notifier).restart();
-          _startTimer(asset);
-        } else {
-          setState(() {
-            _paused = true;
-          });
-        }
-        return;
-      }
+  void _crossFadeToPage(int page) {
+    if (!mounted) {
+      return;
     }
 
-    _startTimer(asset);
-  }
+    // the PageView emits no event for a same-page jump; settle it like any other
+    if (page == _index) {
+      _pageChanged(page);
+      return;
+    }
 
-  void _crossFadeToPage(int page) {
     if (_disableAnimations) {
       _pageController.jumpToPage(page);
       return;
@@ -306,12 +284,13 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
 
   void _startTimer(BaseAsset? asset) {
     _timer?.cancel();
-    _timerHeroTag = asset?.heroTag;
+    _armedHeroTag = asset?.heroTag;
 
     if (asset == null || asset.isImage) {
       _timer = Timer(Duration(milliseconds: _config.duration * 1000 - _stopwatch.elapsedMilliseconds), _onTimer);
       _stopwatch.start();
     } else {
+      // stall baseline for the next check
       _lastVideoPosition = ref.read(videoPlayerProvider(asset.heroTag)).position;
       _timer = Timer(Duration(seconds: _config.duration), _onTimer);
     }
@@ -323,13 +302,6 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
     }
 
     final asset = widget.timeline.getAssetSafe(_index);
-    if (asset?.heroTag != _timerHeroTag) {
-      // the slide changed under us (timeline reload); adopt what is here and stay armed
-      _stopwatch.stop();
-      _stopwatch.reset();
-      _startTimer(asset);
-      return;
-    }
 
     if (asset == null || asset.isImage) {
       _stopwatch.stop();
@@ -357,14 +329,31 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
     _startTimer(asset);
   }
 
+  // the timeline changed under us; re-arm for whatever is on the slide now,
+  // but an unrelated sync must not reset a running wait
+  void _onTimelineReload() {
+    if (!mounted || _paused) {
+      return;
+    }
+
+    final asset = widget.timeline.getAssetSafe(_index);
+    if (_index < widget.timeline.totalAssets && asset?.heroTag == _armedHeroTag) {
+      return;
+    }
+
+    _stopwatch.stop();
+    _stopwatch.reset();
+    _startTimer(asset);
+  }
+
   void _pageChanged(int page) {
-    final asset = widget.timeline.getAssetSafe(page)!;
+    final asset = widget.timeline.getAssetSafe(page);
 
     setState(() {
       _index = page;
       _zoomCycle++;
 
-      if (!asset.isImage) {
+      if (asset != null && !asset.isImage) {
         _paused = false;
       }
     });
@@ -372,12 +361,31 @@ class _DriftSlideshowPageState extends ConsumerState<DriftSlideshowPage>
     _timer?.cancel();
     _stopwatch.stop();
     _stopwatch.reset();
+    _updateNextIndex();
 
-    if (!_paused) {
-      _startTimer(asset);
+    if (_paused) {
+      return;
     }
 
-    _updateNextIndex();
+    // a completed video with no different slide to go to replays on repeat or stops
+    if (asset != null && !asset.isImage) {
+      final playerState = ref.read(videoPlayerProvider(asset.heroTag));
+      final completed = playerState.status == VideoPlaybackStatus.completed && playerState.position > Duration.zero;
+      final hasDifferentTarget = _nextIndex != _index && _nextIndex >= 0 && _nextIndex < widget.timeline.totalAssets;
+      if (completed && !hasDifferentTarget) {
+        if (_config.repeat) {
+          ref.read(videoPlayerProvider(asset.heroTag).notifier).restart();
+          _startTimer(asset);
+        } else {
+          setState(() {
+            _paused = true;
+          });
+        }
+        return;
+      }
+    }
+
+    _startTimer(asset);
   }
 
   void _onTapUp() async {
