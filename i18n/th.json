@@ -612,7 +612,7 @@
   "assets_were_part_of_album_count": "{count, plural, one {Asset was} other {Assets were}} อยู่ในอัลบั้มอยู่แล้ว",
   "assets_were_part_of_albums_count": "{count, plural, one {สื่อ} other {สื่อ}}เป็นส่วนหนึ่งของอัลบั้มอยู่แล้ว",
   "authorized_devices": "อุปกรณ์ที่ได้รับอนุญาต",
-  "automatic_endpoint_switching_subtitle": "เชื่อมต่อโดยตรงพ่านวง Wi-Fi ที่ระบุไว้ และเชื่อมต่อด้วยวิธีอื่นเมื่ออยู่นอก Wi-Fi ที่ระบุไว้",
+  "automatic_endpoint_switching_subtitle": "เชื่อมต่อโดยตรงเมื่ออยู่ใน Wi-Fi ที่ระบุไว้ และเชื่อมต่อด้วยวิธีอื่นเมื่ออยู่นอก Wi-Fi ที่ระบุไว้",
   "automatic_endpoint_switching_title": "สลับ URL อัตโนมัติ",
   "autoplay_slideshow": "เล่นสไลด์โชว์",
   "back": "กลับ",
