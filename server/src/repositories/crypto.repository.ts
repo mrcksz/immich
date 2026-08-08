@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { compareSync, hash } from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { createHash, createPublicKey, createVerify, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createPublicKey, createVerify, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 
 @Injectable()
@@ -20,6 +20,12 @@ export class CryptoRepository {
 
   compareBcrypt(data: string | Buffer, encrypted: string) {
     return compareSync(data, encrypted);
+  }
+
+  /** Compares two secrets without leaking their contents through timing differences. */
+  compareTimingSafe(a: string, b: string) {
+    // hashing first keeps the comparison constant-time even when the lengths differ
+    return timingSafeEqual(this.hashSha256(a), this.hashSha256(b));
   }
 
   hashSha256(value: string) {

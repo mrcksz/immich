@@ -21,6 +21,7 @@
   let password = $state('');
   let slug = $state('');
   let expiresAt = $state<string | null>(null);
+  let generateAccessToken = $state(false);
 
   let type = $derived(albumId ? SharedLinkType.Album : SharedLinkType.Individual);
 
@@ -36,6 +37,7 @@
       allowDownload,
       showMetadata,
       slug,
+      generateAccessToken,
     });
     if (success) {
       onClose();
@@ -67,5 +69,6 @@
     bind:allowUpload
     bind:showMetadata
     bind:expiresAt
+    bind:generateAccessToken
   />
 </FormModal>

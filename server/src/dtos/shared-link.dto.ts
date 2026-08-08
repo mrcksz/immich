@@ -30,6 +30,10 @@ const SharedLinkCreateSchema = z
     allowUpload: z.boolean().optional().describe('Allow uploads'),
     allowDownload: z.boolean().default(true).optional().describe('Allow downloads'),
     showMetadata: z.boolean().default(true).optional().describe('Show metadata'),
+    generateAccessToken: z
+      .boolean()
+      .optional()
+      .describe('Generate an access token that skips the password prompt (requires a password)'),
   })
   .meta({ id: 'SharedLinkCreateDto' });
 
@@ -42,12 +46,17 @@ const SharedLinkEditSchema = z
     allowUpload: z.boolean().optional().describe('Allow uploads'),
     allowDownload: z.boolean().optional().describe('Allow downloads'),
     showMetadata: z.boolean().optional().describe('Show metadata'),
+    generateAccessToken: z
+      .boolean()
+      .optional()
+      .describe('Ensure an access token exists (true) or revoke the existing one (false)'),
   })
   .meta({ id: 'SharedLinkEditDto' });
 
 const SharedLinkLoginSchema = z
   .object({
-    password: z.string().describe('Shared link password').meta({ example: 'password' }),
+    password: z.string().optional().describe('Shared link password').meta({ example: 'password' }),
+    accessToken: z.string().optional().describe('Shared link access token, used instead of the password'),
   })
   .meta({ id: 'SharedLinkLoginDto' });
 
@@ -67,6 +76,11 @@ const SharedLinkResponseSchema = z
     allowDownload: z.boolean().describe('Allow downloads'),
     showMetadata: z.boolean().describe('Show metadata'),
     slug: z.string().nullable().describe('Custom URL slug'),
+    accessToken: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Access token that skips the password prompt. Only returned to the owner of the link.'),
   })
   .describe('Shared link response')
   .meta({ id: 'SharedLinkResponseDto' });
@@ -77,10 +91,15 @@ export class SharedLinkEditDto extends createZodDto(SharedLinkEditSchema) {}
 export class SharedLinkLoginDto extends createZodDto(SharedLinkLoginSchema) {}
 export class SharedLinkResponseDto extends createZodDto(SharedLinkResponseSchema) {}
 
-export function mapSharedLink(sharedLink: SharedLink, options: { stripAssetMetadata: boolean }): SharedLinkResponseDto {
+export function mapSharedLink(
+  sharedLink: SharedLink,
+  options: { stripAssetMetadata: boolean; includeAccessToken?: boolean },
+): SharedLinkResponseDto {
   const assets = sharedLink.assets || [];
 
   const response = {
+    // opt-in, so that responses served to link visitors never leak the token
+    accessToken: options.includeAccessToken ? sharedLink.accessToken : undefined,
     id: sharedLink.id,
     description: sharedLink.description,
     password: sharedLink.password,

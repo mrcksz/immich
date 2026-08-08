@@ -19,6 +19,7 @@ import { Route } from '$lib/route';
 import { copyToClipboard } from '$lib/utils';
 import { handleError } from '$lib/utils/handle-error';
 import { getFormatter } from '$lib/utils/i18n';
+import { withAccessToken } from '$lib/utils/shared-links';
 
 export const getSharedLinksActions = ($t: MessageFormatter) => {
   const ViewAll: ActionItem = {
@@ -61,7 +62,10 @@ export const getSharedLinkActions = ($t: MessageFormatter, sharedLink: SharedLin
 
 export const asUrl = (sharedLink: SharedLinkResponseDto) => {
   const path = Route.viewSharedLink(sharedLink);
-  return new URL(path, serverConfigManager.value.externalDomain || location.origin).href;
+  const url = new URL(path, serverConfigManager.value.externalDomain || location.origin).href;
+
+  // carries the access token so the copied link and QR code unlock the link on their own
+  return sharedLink.accessToken ? withAccessToken(url, sharedLink.accessToken) : url;
 };
 
 export const handleCreateSharedLink = async (dto: SharedLinkCreateDto) => {

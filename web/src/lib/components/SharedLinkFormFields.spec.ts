@@ -6,7 +6,7 @@ describe('SharedLinkFormFields component', () => {
   const isChecked = (element: Element) =>
     element instanceof HTMLInputElement ? element.checked : element.getAttribute('aria-checked') === 'true';
 
-  it('turns downloads off when metadata is disabled', async () => {
+  const render = (props: Partial<Record<string, unknown>> = {}) => {
     const { container } = renderWithTooltips(SharedLinkFormFields, {
       slug: '',
       password: '',
@@ -15,18 +15,51 @@ describe('SharedLinkFormFields component', () => {
       allowUpload: false,
       showMetadata: true,
       expiresAt: null,
+      generateAccessToken: false,
+      ...props,
     });
+
+    // in DOM order: access token, metadata, download, upload
+    const switches = Array.from(container.querySelectorAll('[role="switch"], input[type="checkbox"]'));
+    expect(switches).toHaveLength(4);
+
+    const [generateAccessToken, showMetadata, allowDownload, allowUpload] = switches;
+    return { container, generateAccessToken, showMetadata, allowDownload, allowUpload };
+  };
+
+  it('turns downloads off when metadata is disabled', async () => {
+    const { showMetadata, allowDownload } = render();
     const user = userEvent.setup();
 
-    const switches = Array.from(container.querySelectorAll('[role="switch"], input[type="checkbox"]'));
-    expect(switches).toHaveLength(3);
+    expect(isChecked(allowDownload)).toBe(true);
 
-    const [showMetadataSwitch, allowDownloadSwitch] = switches;
-    expect(isChecked(allowDownloadSwitch)).toBe(true);
+    await user.click(showMetadata);
 
-    await user.click(showMetadataSwitch);
+    expect(isChecked(showMetadata)).toBe(false);
+    expect(isChecked(allowDownload)).toBe(false);
+  });
 
-    expect(isChecked(showMetadataSwitch)).toBe(false);
-    expect(isChecked(allowDownloadSwitch)).toBe(false);
+  it('keeps the access token switch off without a password', () => {
+    const { generateAccessToken } = render({ generateAccessToken: true });
+
+    expect(isChecked(generateAccessToken)).toBe(false);
+  });
+
+  it('allows an access token once a password is set', () => {
+    const { generateAccessToken } = render({ password: 'secret', generateAccessToken: true });
+
+    expect(isChecked(generateAccessToken)).toBe(true);
+  });
+
+  it('revokes the access token when the password is cleared', async () => {
+    const { container, generateAccessToken } = render({ password: 'secret', generateAccessToken: true });
+    const user = userEvent.setup();
+
+    const passwordInput = container.querySelector('input[type="password"]');
+    expect(passwordInput).not.toBeNull();
+
+    await user.clear(passwordInput!);
+
+    expect(isChecked(generateAccessToken)).toBe(false);
   });
 });

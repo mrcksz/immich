@@ -4,6 +4,37 @@ import { authenticate } from '$lib/utils/auth';
 import { getFormatter } from '$lib/utils/i18n';
 import { getAssetInfoFromParam } from '$lib/utils/navigation';
 
+/**
+ * Access tokens travel in the URL fragment rather than the query string, because browsers never
+ * send fragments to the server. That keeps a printed QR code out of access logs and referrer
+ * headers while still unlocking a password protected link.
+ */
+const ACCESS_TOKEN_FRAGMENT = 't';
+
+const readAccessToken = () => {
+  if (globalThis.window === undefined) {
+    return null;
+  }
+
+  return new URLSearchParams(location.hash.slice(1)).get(ACCESS_TOKEN_FRAGMENT);
+};
+
+export const hasAccessToken = () => readAccessToken() !== null;
+
+/** Reads the token and strips it from the address bar, so it does not linger in history or bookmarks. */
+export const takeAccessToken = () => {
+  const accessToken = readAccessToken();
+  if (accessToken !== null) {
+    const { pathname, search } = location;
+    history.replaceState(history.state, '', pathname + search);
+  }
+
+  return accessToken;
+};
+
+export const withAccessToken = (url: string, accessToken: string) =>
+  `${url}#${new URLSearchParams({ [ACCESS_TOKEN_FRAGMENT]: accessToken })}`;
+
 export const asQueryString = ({ slug, key }: { slug?: string; key?: string }) => {
   const params = new URLSearchParams();
   if (slug) {
