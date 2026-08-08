@@ -25,6 +25,7 @@
   let slug = $state(sharedLink.slug ?? '');
   let shareType = sharedLink.album ? SharedLinkType.Album : SharedLinkType.Individual;
   let expiresAt = $state(sharedLink.expiresAt);
+  let generateAccessToken = $state(!!sharedLink.accessToken);
 
   const onClose = async () => {
     await goto(Route.sharedLinks());
@@ -39,6 +40,7 @@
       allowDownload,
       showMetadata,
       slug: slug.trim() ?? null,
+      generateAccessToken,
     });
     if (success) {
       await onClose();
@@ -71,5 +73,6 @@
     bind:allowUpload
     bind:showMetadata
     bind:expiresAt
+    bind:generateAccessToken
   />
 </FormModal>

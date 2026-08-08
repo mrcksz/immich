@@ -2176,6 +2176,8 @@ export type SessionUpdateDto = {
     isPendingSyncReset?: boolean;
 };
 export type SharedLinkResponseDto = {
+    /** Access token that skips the password prompt. Only returned to the owner of the link. */
+    accessToken?: string | null;
     album?: AlbumResponseDto;
     /** Allow downloads */
     allowDownload: boolean;
@@ -2215,6 +2217,8 @@ export type SharedLinkCreateDto = {
     description?: string | null;
     /** Expiration date */
     expiresAt?: string | null;
+    /** Generate an access token that skips the password prompt (requires a password) */
+    generateAccessToken?: boolean;
     /** Link password */
     password?: string | null;
     /** Show metadata */
@@ -2224,8 +2228,10 @@ export type SharedLinkCreateDto = {
     "type": SharedLinkType;
 };
 export type SharedLinkLoginDto = {
+    /** Shared link access token, used instead of the password */
+    accessToken?: string;
     /** Shared link password */
-    password: string;
+    password?: string;
 };
 export type SharedLinkEditDto = {
     /** Allow downloads */
@@ -2236,6 +2242,8 @@ export type SharedLinkEditDto = {
     description?: string | null;
     /** Expiration date */
     expiresAt?: string | null;
+    /** Ensure an access token exists (true) or revoke the existing one (false) */
+    generateAccessToken?: boolean;
     /** Link password */
     password?: string | null;
     /** Show metadata */

@@ -23041,6 +23041,10 @@
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
             "type": "string"
           },
+          "generateAccessToken": {
+            "description": "Generate an access token that skips the password prompt (requires a password)",
+            "type": "boolean"
+          },
           "password": {
             "description": "Link password",
             "nullable": true,
@@ -23088,6 +23092,10 @@
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
             "type": "string"
           },
+          "generateAccessToken": {
+            "description": "Ensure an access token exists (true) or revoke the existing one (false)",
+            "type": "boolean"
+          },
           "password": {
             "description": "Link password",
             "nullable": true,
@@ -23107,20 +23115,26 @@
       },
       "SharedLinkLoginDto": {
         "properties": {
+          "accessToken": {
+            "description": "Shared link access token, used instead of the password",
+            "type": "string"
+          },
           "password": {
             "description": "Shared link password",
             "example": "password",
             "type": "string"
           }
         },
-        "required": [
-          "password"
-        ],
         "type": "object"
       },
       "SharedLinkResponseDto": {
         "description": "Shared link response",
         "properties": {
+          "accessToken": {
+            "description": "Access token that skips the password prompt. Only returned to the owner of the link.",
+            "nullable": true,
+            "type": "string"
+          },
           "album": {
             "$ref": "#/components/schemas/AlbumResponseDto"
           },
