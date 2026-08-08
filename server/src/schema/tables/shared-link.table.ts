@@ -51,4 +51,9 @@ export class SharedLinkTable {
 
   @Column({ type: 'character varying', nullable: true, unique: true })
   slug!: string | null;
+
+  // grants access to a password protected link without prompting for the password,
+  // so the link can be embedded in a QR code
+  @Column({ type: 'character varying', nullable: true, index: true })
+  accessToken!: string | null;
 }

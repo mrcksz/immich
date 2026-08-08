@@ -7,6 +7,7 @@ export const newCryptoRepositoryMock = (): Mocked<RepositoryInterface<CryptoRepo
     randomUUID: vitest.fn().mockReturnValue('random-uuid'),
     randomBytes: vitest.fn().mockReturnValue(Buffer.from('random-bytes', 'utf8')),
     compareBcrypt: vitest.fn().mockReturnValue(true),
+    compareTimingSafe: vitest.fn().mockImplementation((a, b) => a === b),
     hashBcrypt: vitest.fn().mockImplementation((input) => Promise.resolve(`${input} (hashed)`)),
     hashSha256: vitest.fn().mockImplementation((input) => Buffer.from(`${input} (hashed)`)),
     verifySha256: vitest.fn().mockImplementation(() => true),

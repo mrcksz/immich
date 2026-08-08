@@ -8,9 +8,16 @@
   import { setSharedLink } from '$lib/utils';
   import { handleError } from '$lib/utils/handle-error';
   import { navigate } from '$lib/utils/navigation';
-  import { sharedLinkLogin, SharedLinkType, type AssetResponseDto, type SharedLinkResponseDto } from '@immich/sdk';
+  import { hasAccessToken, takeAccessToken } from '$lib/utils/shared-links';
+  import {
+    sharedLinkLogin,
+    SharedLinkType,
+    type AssetResponseDto,
+    type SharedLinkLoginDto,
+    type SharedLinkResponseDto,
+  } from '@immich/sdk';
   import { Button, Logo, PasswordInput } from '@immich/ui';
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { t } from 'svelte-i18n';
 
   type Props = {
@@ -35,34 +42,55 @@
   let { title, description } = $state(meta);
   let isOwned = $derived(authManager.authenticated && authManager.user.id === sharedLink?.userId);
   let password = $state('');
+  // set upfront so the password form never flashes before the token is tried
+  let isUnlocking = $state(passwordRequired ? hasAccessToken() : false);
 
   if (passwordRequired) {
     assetViewerManager.showAssetViewer(false);
   }
 
-  const handlePasswordSubmit = async () => {
+  const login = async (sharedLinkLoginDto: SharedLinkLoginDto) => {
+    sharedLink = await sharedLinkLogin({ key, slug, sharedLinkLoginDto });
+    setSharedLink(sharedLink);
+    passwordRequired = false;
+    title = (sharedLink.album ? sharedLink.album.albumName : $t('public_share')) + ' - Immich';
+    description =
+      sharedLink.description ||
+      $t('shared_photos_and_videos_count', { values: { assetCount: sharedLink.assets.length } });
+    await tick();
+    await navigate(
+      { targetRoute: 'current', assetId: null, assetGridRouteSearchParams: assetViewerManager.gridScrollTarget },
+      { forceNavigate: true, replaceState: true },
+    );
+  };
+
+  const onsubmit = async (event: Event) => {
+    event.preventDefault();
     try {
-      sharedLink = await sharedLinkLogin({ key, slug, sharedLinkLoginDto: { password } });
-      setSharedLink(sharedLink);
-      passwordRequired = false;
-      title = (sharedLink.album ? sharedLink.album.albumName : $t('public_share')) + ' - Immich';
-      description =
-        sharedLink.description ||
-        $t('shared_photos_and_videos_count', { values: { assetCount: sharedLink.assets.length } });
-      await tick();
-      await navigate(
-        { targetRoute: 'current', assetId: null, assetGridRouteSearchParams: assetViewerManager.gridScrollTarget },
-        { forceNavigate: true, replaceState: true },
-      );
+      await login({ password });
     } catch (error) {
       handleError(error, $t('errors.unable_to_get_shared_link'));
     }
   };
 
-  const onsubmit = async (event: Event) => {
-    event.preventDefault();
-    await handlePasswordSubmit();
-  };
+  // Unlocks a password protected link from `#t=<token>`, so a printed QR code can grant access
+  // without the visitor typing anything. The fragment stays client side, keeping the token out of
+  // request logs and referrer headers.
+  onMount(async () => {
+    const accessToken = takeAccessToken();
+    if (!passwordRequired || !accessToken) {
+      isUnlocking = false;
+      return;
+    }
+
+    try {
+      await login({ accessToken });
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_unlock_shared_link'));
+    } finally {
+      isUnlocking = false;
+    }
+  });
 
   onDestroy(() => {
     setSharedLink(undefined);
@@ -78,16 +106,20 @@
     class="relative h-dvh overflow-hidden px-6 pt-(--navbar-height) max-md:pt-(--navbar-height-md) sm:px-12 md:px-24 lg:px-40"
   >
     <div class="mt-20 flex flex-col items-center justify-center">
-      <div class="text-2xl font-bold text-primary">{$t('password_required')}</div>
-      <div class="mt-4 text-lg text-primary">
-        {$t('sharing_enter_password')}
-      </div>
-      <div class="mt-4">
-        <form class="flex gap-x-2" novalidate {onsubmit}>
-          <PasswordInput autocomplete="off" bind:value={password} placeholder="Password" />
-          <Button type="submit">{$t('submit')}</Button>
-        </form>
-      </div>
+      {#if isUnlocking}
+        <div class="text-2xl font-bold text-primary">{$t('unlocking_shared_link')}</div>
+      {:else}
+        <div class="text-2xl font-bold text-primary">{$t('password_required')}</div>
+        <div class="mt-4 text-lg text-primary">
+          {$t('sharing_enter_password')}
+        </div>
+        <div class="mt-4">
+          <form class="flex gap-x-2" novalidate {onsubmit}>
+            <PasswordInput autocomplete="off" bind:value={password} placeholder="Password" />
+            <Button type="submit">{$t('submit')}</Button>
+          </form>
+        </div>
+      {/if}
     </div>
   </main>
   <header>

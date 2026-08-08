@@ -1,6 +1,6 @@
-import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, UnauthorizedException } from '@nestjs/common';
 import { AssetIdErrorReason } from 'src/dtos/asset-ids.response.dto';
-import { mapSharedLink } from 'src/dtos/shared-link.dto';
+import { mapSharedLink, SharedLinkEditDto } from 'src/dtos/shared-link.dto';
 import { SharedLinkType } from 'src/enum';
 import { SharedLinkService } from 'src/services/shared-link.service';
 import { AlbumFactory } from 'test/factories/album.factory';
@@ -12,6 +12,10 @@ import { getForSharedLink } from 'test/mappers';
 import { factory } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 
+const expectStatus = async (promise: Promise<unknown>, status: number) => {
+  await expect(promise).rejects.toSatisfy((error) => (error as HttpException).getStatus() === status);
+};
+
 describe(SharedLinkService.name, () => {
   let sut: SharedLinkService;
   let mocks: ServiceMocks;
@@ -19,6 +23,38 @@ describe(SharedLinkService.name, () => {
   beforeEach(() => {
     ({ sut, mocks } = newTestService(SharedLinkService));
   });
+
+  /** Stages a password protected link as the one the request authenticated against. */
+  const setup = (dto: { password?: string | null; accessToken?: string | null }) => {
+    const sharedLink = SharedLinkFactory.create({ password: 'password', ...dto });
+    mocks.sharedLink.get.mockResolvedValue(getForSharedLink(sharedLink));
+    return sharedLink;
+  };
+
+  const createWithAssets = async (dto: { password?: string | null; generateAccessToken?: boolean }) => {
+    const asset = AssetFactory.create();
+    const sharedLink = SharedLinkFactory.from()
+      .asset(asset, (builder) => builder.exif())
+      .build();
+    mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+    mocks.sharedLink.create.mockResolvedValue(getForSharedLink(sharedLink));
+
+    await sut.create(authStub.admin, { type: SharedLinkType.Individual, assetIds: [asset.id], ...dto });
+
+    return (mocks.sharedLink.create.mock.calls.at(-1)?.[0] as { accessToken?: string | null }).accessToken;
+  };
+
+  const updateAccessToken = async (
+    existing: { password?: string | null; accessToken?: string | null },
+    dto: SharedLinkEditDto,
+  ) => {
+    const sharedLink = setup(existing);
+    mocks.sharedLink.update.mockResolvedValue(getForSharedLink(sharedLink));
+
+    await sut.update(authStub.user1, sharedLink.id, dto);
+
+    return (mocks.sharedLink.update.mock.calls.at(-1)?.[0] as { accessToken?: string | null }).accessToken;
+  };
 
   it('should work', () => {
     expect(sut).toBeDefined();
@@ -30,7 +66,7 @@ describe(SharedLinkService.name, () => {
       mocks.sharedLink.getAll.mockResolvedValue([getForSharedLink(sharedLink1), getForSharedLink(sharedLink2)]);
       await expect(sut.getAll(authStub.user1, {})).resolves.toEqual(
         [getForSharedLink(sharedLink1), getForSharedLink(sharedLink2)].map((link) =>
-          mapSharedLink(link, { stripAssetMetadata: false }),
+          mapSharedLink(link, { stripAssetMetadata: false, includeAccessToken: true }),
         ),
       );
       expect(mocks.sharedLink.getAll).toHaveBeenCalledWith({ userId: authStub.user1.user.id });
@@ -93,6 +129,78 @@ describe(SharedLinkService.name, () => {
     });
   });
 
+  describe('login', () => {
+    const auth = authStub.adminSharedLink;
+
+    it('should reject a link without a password', async () => {
+      setup({ password: null });
+      await expect(sut.login(auth, { password: 'password' })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('should require either a password or an access token', async () => {
+      setup({});
+      await expect(sut.login(auth, {})).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('should accept a valid access token', async () => {
+      setup({ accessToken: 'valid-token' });
+      await expect(sut.login(auth, { accessToken: 'valid-token' })).resolves.toEqual(
+        expect.objectContaining({ token: expect.any(String) }),
+      );
+    });
+
+    it('should not leak the access token to the visitor', async () => {
+      setup({ accessToken: 'valid-token' });
+      const { sharedLink } = await sut.login(auth, { accessToken: 'valid-token' });
+      expect(sharedLink.accessToken).toBeUndefined();
+    });
+
+    it('should reject an invalid access token', async () => {
+      setup({ accessToken: 'valid-token' });
+      await expect(sut.login(auth, { accessToken: 'wrong-token' })).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('should reject an access token when the link has none', async () => {
+      setup({ accessToken: null });
+      await expect(sut.login(auth, { accessToken: 'any-token' })).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('should block password guessing after repeated failures', async () => {
+      setup({});
+
+      for (let i = 0; i < 10; i++) {
+        await expect(sut.login(auth, { password: 'wrong' })).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+
+      await expectStatus(sut.login(auth, { password: 'wrong' }), 429);
+      // the correct password is refused too, otherwise the limit could be probed away
+      await expectStatus(sut.login(auth, { password: 'password' }), 429);
+    });
+
+    it('should clear the failure count after a successful login', async () => {
+      setup({});
+
+      for (let i = 0; i < 9; i++) {
+        await expect(sut.login(auth, { password: 'wrong' })).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+      await expect(sut.login(auth, { password: 'password' })).resolves.toBeDefined();
+
+      for (let i = 0; i < 9; i++) {
+        await expect(sut.login(auth, { password: 'wrong' })).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+    });
+
+    it('should not let password failures lock out the access token', async () => {
+      setup({ accessToken: 'valid-token' });
+
+      for (let i = 0; i < 11; i++) {
+        await expect(sut.login(auth, { password: 'wrong' })).rejects.toBeInstanceOf(HttpException);
+      }
+
+      await expect(sut.login(auth, { accessToken: 'valid-token' })).resolves.toBeDefined();
+    });
+  });
+
   describe('get', () => {
     it('should throw an error for an invalid shared link', async () => {
       mocks.sharedLink.get.mockResolvedValue(void 0);
@@ -107,7 +215,7 @@ describe(SharedLinkService.name, () => {
       const sharedLink = SharedLinkFactory.create();
       mocks.sharedLink.get.mockResolvedValue(getForSharedLink(sharedLink));
       await expect(sut.get(authStub.user1, sharedLink.id)).resolves.toEqual(
-        mapSharedLink(getForSharedLink(sharedLink), { stripAssetMetadata: true }),
+        mapSharedLink(getForSharedLink(sharedLink), { stripAssetMetadata: true, includeAccessToken: true }),
       );
       expect(mocks.sharedLink.get).toHaveBeenCalledWith(authStub.user1.user.id, sharedLink.id);
     });
@@ -158,6 +266,7 @@ describe(SharedLinkService.name, () => {
         slug: null,
         showExif: true,
         key: Buffer.from('random-bytes', 'utf8'),
+        accessToken: null,
       });
     });
 
@@ -194,6 +303,7 @@ describe(SharedLinkService.name, () => {
         expiresAt: null,
         showExif: true,
         key: Buffer.from('random-bytes', 'utf8'),
+        accessToken: null,
       });
     });
 
@@ -230,7 +340,24 @@ describe(SharedLinkService.name, () => {
         showExif: false,
         slug: null,
         key: Buffer.from('random-bytes', 'utf8'),
+        accessToken: null,
       });
+    });
+  });
+
+  describe('create access token', () => {
+    it('should generate an access token when requested', async () => {
+      await expect(createWithAssets({ password: 'password', generateAccessToken: true })).resolves.toEqual(
+        expect.any(String),
+      );
+    });
+
+    it('should not generate an access token by default', async () => {
+      await expect(createWithAssets({ password: 'password' })).resolves.toBeNull();
+    });
+
+    it('should reject an access token without a password', async () => {
+      await expect(createWithAssets({ generateAccessToken: true })).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
@@ -257,7 +384,39 @@ describe(SharedLinkService.name, () => {
         slug: null,
         userId: authStub.user1.user.id,
         allowDownload: false,
+        accessToken: undefined,
       });
+    });
+
+    it('should generate an access token on request', async () => {
+      await expect(updateAccessToken({}, { generateAccessToken: true })).resolves.toEqual(expect.any(String));
+    });
+
+    it('should keep an existing access token so printed QR codes stay valid', async () => {
+      await expect(updateAccessToken({ accessToken: 'existing' }, { generateAccessToken: true })).resolves.toBe(
+        'existing',
+      );
+    });
+
+    it('should revoke the access token on request', async () => {
+      await expect(updateAccessToken({ accessToken: 'existing' }, { generateAccessToken: false })).resolves.toBeNull();
+    });
+
+    it('should reject an access token for a link without a password', async () => {
+      const sharedLink = SharedLinkFactory.create({ password: null });
+      mocks.sharedLink.get.mockResolvedValue(getForSharedLink(sharedLink));
+
+      await expect(sut.update(authStub.user1, sharedLink.id, { generateAccessToken: true })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('should revoke the access token when the password is removed', async () => {
+      await expect(updateAccessToken({ accessToken: 'existing' }, { password: null })).resolves.toBeNull();
+    });
+
+    it('should keep the access token when an unrelated field changes', async () => {
+      await expect(updateAccessToken({ accessToken: 'existing' }, { allowDownload: false })).resolves.toBeUndefined();
     });
   });
 

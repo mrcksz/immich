@@ -11,6 +11,7 @@
     allowUpload: boolean;
     showMetadata: boolean;
     expiresAt: string | null;
+    generateAccessToken: boolean;
   };
 
   let {
@@ -21,11 +22,19 @@
     allowUpload = $bindable(),
     showMetadata = $bindable(),
     expiresAt = $bindable(),
+    generateAccessToken = $bindable(),
   }: Props = $props();
 
   $effect(() => {
     if (!showMetadata && allowDownload) {
       allowDownload = false;
+    }
+  });
+
+  $effect(() => {
+    // without a password there is no prompt to skip
+    if (!password && generateAccessToken) {
+      generateAccessToken = false;
     }
   });
 </script>
@@ -45,6 +54,14 @@
 
   <Field label={$t('password')} description={$t('shared_link_password_description')}>
     <PasswordInput bind:value={password} autocomplete="new-password" />
+  </Field>
+
+  <Field
+    label={$t('shared_link_access_token_title')}
+    description={$t('shared_link_access_token_description')}
+    disabled={!password}
+  >
+    <Switch bind:checked={generateAccessToken} />
   </Field>
 
   <Field label={$t('description')}>
