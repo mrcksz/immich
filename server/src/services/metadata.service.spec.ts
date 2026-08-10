@@ -275,6 +275,42 @@ describe(MetadataService.name, () => {
       });
     });
 
+    it('should take the wall clock reading of the server time zone when missing exif', async () => {
+      const originalTz = process.env.TZ;
+      process.env.TZ = 'Europe/Berlin';
+
+      try {
+        // a photo taken at 06:45:38 local time, whose file timestamp is the matching UTC instant
+        const fileModifiedAt = new Date('2026-08-10T04:45:38.000Z');
+        const asset = AssetFactory.create({ fileCreatedAt: fileModifiedAt, fileModifiedAt });
+        mocks.assetJob.getForMetadataExtraction.mockResolvedValue(getForMetadataExtraction(asset));
+        mocks.storage.stat.mockResolvedValue({
+          size: 123_456,
+          mtime: fileModifiedAt,
+          mtimeMs: fileModifiedAt.valueOf(),
+          birthtimeMs: fileModifiedAt.valueOf(),
+        } as Stats);
+        mockReadTags();
+
+        await sut.handleMetadataExtraction({ id: asset.id });
+
+        // the instant is unchanged, but the local time has to read 06:45 rather than 04:45
+        expect(mocks.asset.upsertExif).toHaveBeenCalledWith(
+          expect.objectContaining({
+            exif: expect.objectContaining({ dateTimeOriginal: fileModifiedAt }),
+          }),
+        );
+        expect(mocks.asset.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            fileCreatedAt: fileModifiedAt,
+            localDateTime: new Date('2026-08-10T06:45:38.000Z'),
+          }),
+        );
+      } finally {
+        process.env.TZ = originalTz;
+      }
+    });
+
     it('should determine dateTimeOriginal regardless of the server time zone', async () => {
       process.env.TZ = 'America/Los_Angeles';
       const asset = AssetFactory.create();

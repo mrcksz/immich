@@ -1040,7 +1040,11 @@ export class MetadataService extends BaseService {
       this.logger.debug(
         `No exif date time found, falling back on ${earliestDate.toISO()}, earliest of file creation and modification for asset ${asset.id}: ${asset.originalPath}`,
       );
-      dateTimeOriginal = localDateTime = earliestDate;
+      dateTimeOriginal = earliestDate;
+      // the file timestamp is an instant, so it carries no zone of its own and Luxon resolves it
+      // against the server zone. Take that wall clock reading as the local time, the same way the
+      // exif path above does, instead of letting the UTC instant become the local time.
+      localDateTime = earliestDate.setZone('UTC', { keepLocalTime: true });
     }
 
     this.logger.verbose(`Found local date time ${localDateTime.toISO()} for asset ${asset.id}: ${asset.originalPath}`);
