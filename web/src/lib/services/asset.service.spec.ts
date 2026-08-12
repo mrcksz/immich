@@ -1,9 +1,9 @@
 import { getAssetInfo } from '@immich/sdk';
-import { toastManager } from '@immich/ui';
+import { modalManager, toastManager } from '@immich/ui';
 import { vitest } from 'vitest';
 import { authManager } from '$lib/managers/auth-manager.svelte';
-import { getAssetActions, handleDownloadAsset } from '$lib/services/asset.service';
-import { setSharedLink } from '$lib/utils';
+import { getAssetActions, handleDownloadAsset, handleDownloadAssetWithChoice } from '$lib/services/asset.service';
+import { canShareFiles, setSharedLink } from '$lib/utils';
 import { getFormatter } from '$lib/utils/i18n';
 import { assetFactory } from '@test-data/factories/asset-factory';
 import { preferencesFactory } from '@test-data/factories/preferences-factory';
@@ -13,6 +13,9 @@ import { userAdminFactory } from '@test-data/factories/user-factory';
 vitest.mock('@immich/ui', () => ({
   toastManager: {
     primary: vitest.fn(),
+  },
+  modalManager: {
+    show: vitest.fn(),
   },
 }));
 
@@ -28,6 +31,9 @@ vitest.mock('$lib/utils', async () => {
   return {
     ...originalModule,
     sleep: vitest.fn(),
+    canShareFiles: vitest.fn(),
+    shareFile: vitest.fn(),
+    downloadUrl: vitest.fn(),
   };
 });
 
@@ -91,6 +97,41 @@ describe('AssetService', () => {
       expect($t).toHaveBeenNthCalledWith(1, 'downloading_asset_filename', { values: { filename: 'asset.heic' } });
       expect($t).toHaveBeenNthCalledWith(2, 'downloading_asset_filename', { values: { filename: 'asset-motion.mov' } });
       expect(toastManager.primary).toHaveBeenCalledWith('formatter');
+    });
+  });
+  describe('handleDownloadAssetWithChoice', () => {
+    beforeEach(() => {
+      vitest.mocked(getFormatter).mockResolvedValue(vitest.fn().mockReturnValue('formatter'));
+      vitest.mocked(modalManager.show).mockReset();
+      vitest.mocked(toastManager.primary).mockClear();
+    });
+
+    it('should download straight away when the share sheet is unavailable', async () => {
+      vitest.mocked(canShareFiles).mockReturnValue(false);
+
+      await handleDownloadAssetWithChoice(assetFactory.build(), { edited: true });
+
+      // desktop browsers would otherwise face a pointless extra question
+      expect(modalManager.show).not.toHaveBeenCalled();
+      expect(toastManager.primary).toHaveBeenCalled();
+    });
+
+    it('should ask where to save when the share sheet is available', async () => {
+      vitest.mocked(canShareFiles).mockReturnValue(true);
+      vitest.mocked(modalManager.show).mockResolvedValue('file');
+
+      await handleDownloadAssetWithChoice(assetFactory.build(), { edited: true });
+
+      expect(modalManager.show).toHaveBeenCalled();
+    });
+
+    it('should do nothing when the prompt is dismissed', async () => {
+      vitest.mocked(canShareFiles).mockReturnValue(true);
+      vitest.mocked(modalManager.show).mockResolvedValue(undefined);
+
+      await handleDownloadAssetWithChoice(assetFactory.build(), { edited: true });
+
+      expect(toastManager.primary).not.toHaveBeenCalled();
     });
   });
 });

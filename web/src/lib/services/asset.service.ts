@@ -45,13 +45,14 @@ import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
 import AssetAddToAlbumModal from '$lib/modals/AssetAddToAlbumModal.svelte';
+import AssetDownloadModal from '$lib/modals/AssetDownloadModal.svelte';
 import AssetTagModal from '$lib/modals/AssetTagModal.svelte';
 import ProfileImageCropperModal from '$lib/modals/ProfileImageCropperModal.svelte';
 import SharedLinkCreateModal from '$lib/modals/SharedLinkCreateModal.svelte';
 import { Route } from '$lib/route';
 import { SlideshowState, slideshowStore } from '$lib/stores/slideshow.store';
-import { getAssetMediaUrl, getSharedLink, sleep } from '$lib/utils';
-import { downloadUrl } from '$lib/utils';
+import { canShareFiles, downloadUrl, getAssetMediaUrl, getSharedLink, shareFile, sleep } from '$lib/utils';
+import { getAssetFilename } from '$lib/utils/asset-utils';
 import { handleError } from '$lib/utils/handle-error';
 import { getFormatter } from '$lib/utils/i18n';
 
@@ -117,7 +118,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     icon: mdiDownload,
     shortcuts: { key: 'd', shift: true },
     $if: () => !!authUser,
-    onAction: () => handleDownloadAsset(asset, { edited: true }),
+    onAction: () => handleDownloadAssetWithChoice(asset, { edited: true }),
   };
 
   const DownloadOriginal: ActionItem = {
@@ -373,6 +374,66 @@ export const handleDownloadAsset = async (asset: AssetResponseDto, { edited }: {
     } catch (error) {
       handleError(error, $t('errors.error_downloading', { values: { filename } }));
     }
+  }
+};
+
+/**
+ * Downloads an asset, asking first where it should go.
+ *
+ * A plain download only reaches the Files app on iOS, so the photo library is offered as well via
+ * the share sheet. The prompt is skipped where the share sheet is unavailable, which covers desktop
+ * browsers, so those keep downloading in a single click.
+ */
+export const handleDownloadAssetWithChoice = async (asset: AssetResponseDto, { edited }: { edited: boolean }) => {
+  if (!canShareFiles()) {
+    return handleDownloadAsset(asset, { edited });
+  }
+
+  const target = await modalManager.show(AssetDownloadModal, {});
+  switch (target) {
+    case 'photos': {
+      return handleSaveAssetToPhotos(asset);
+    }
+    case 'file': {
+      return handleDownloadAsset(asset, { edited });
+    }
+    // dismissed
+  }
+};
+
+/**
+ * Hands the original file to the operating system's share sheet, which on iOS is what offers
+ * "Save Image" into the photo library. A plain download only reaches the Files app.
+ */
+export const handleSaveAssetToPhotos = async (asset: AssetResponseDto) => {
+  const $t = await getFormatter();
+  const filename = getAssetFilename(asset);
+  const url = getAssetMediaUrl({
+    id: asset.id,
+    size: AssetMediaSize.Original,
+    edited: true,
+    cacheKey: asset.thumbhash,
+  });
+
+  try {
+    toastManager.primary($t('preparing_asset_filename', { values: { filename } }));
+    await shareFile(url, filename);
+  } catch (error) {
+    const name = (error as Error)?.name;
+
+    // the sheet was dismissed, which is a normal outcome rather than a failure
+    if (name === 'AbortError') {
+      return;
+    }
+
+    // Safari drops the user gesture when fetching the file took too long, so the share is refused.
+    // Falling back keeps the file reachable instead of leaving the visitor with only an error.
+    if (name === 'NotAllowedError') {
+      downloadUrl(url, filename);
+      return;
+    }
+
+    handleError(error, $t('errors.unable_to_save_to_photos'));
   }
 };
 

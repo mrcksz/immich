@@ -1,5 +1,5 @@
 import { AssetTypeEnum } from '@immich/sdk';
-import { getAssetUrl, semverToName } from '$lib/utils';
+import { getAssetUrl, semverToName, shareFile } from '$lib/utils';
 import { assetFactory } from '@test-data/factories/asset-factory';
 import { sharedLinkFactory } from '@test-data/factories/shared-link-factory';
 
@@ -168,6 +168,63 @@ describe('utils', () => {
 
     it('should append release candidate if set', () => {
       expect(semverToName({ major: 3, minor: 0, patch: 0, prerelease: 0 })).toEqual('v3.0.0-rc.0');
+    });
+  });
+  describe(shareFile.name, () => {
+    const originalFetch = globalThis.fetch;
+    const originalNavigator = globalThis.navigator;
+
+    const mockNavigator = (overrides: Partial<Navigator>) => {
+      Object.defineProperty(globalThis, 'navigator', { value: overrides, configurable: true });
+    };
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      Object.defineProperty(globalThis, 'navigator', { value: originalNavigator, configurable: true });
+    });
+
+    const mockFetch = (ok: boolean, type = 'image/jpeg') => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok,
+        status: ok ? 200 : 404,
+        blob: () => Promise.resolve(new Blob(['data'], { type })),
+      }) as unknown as typeof fetch;
+    };
+
+    it('should pass the fetched file to the share sheet', async () => {
+      mockFetch(true);
+      const share = vi.fn().mockResolvedValue(undefined);
+      mockNavigator({ canShare: () => true, share } as unknown as Navigator);
+
+      await expect(shareFile('/api/assets/1/original', 'beach.jpg')).resolves.toBe(true);
+
+      const [{ files }] = share.mock.calls[0];
+      expect(files[0].name).toBe('beach.jpg');
+      expect(files[0].type).toBe('image/jpeg');
+    });
+
+    it('should not share when the file type is rejected', async () => {
+      mockFetch(true);
+      const share = vi.fn();
+      mockNavigator({ canShare: () => false, share } as unknown as Navigator);
+
+      await expect(shareFile('/api/assets/1/original', 'beach.jpg')).resolves.toBe(false);
+      expect(share).not.toHaveBeenCalled();
+    });
+
+    it('should throw when the file cannot be fetched', async () => {
+      mockFetch(false);
+      mockNavigator({ canShare: () => true, share: vi.fn() } as unknown as Navigator);
+
+      await expect(shareFile('/api/assets/1/original', 'beach.jpg')).rejects.toThrow('404');
+    });
+
+    it('should propagate a dismissed share sheet', async () => {
+      mockFetch(true);
+      const abort = Object.assign(new Error('dismissed'), { name: 'AbortError' });
+      mockNavigator({ canShare: () => true, share: vi.fn().mockRejectedValue(abort) } as unknown as Navigator);
+
+      await expect(shareFile('/api/assets/1/original', 'beach.jpg')).rejects.toMatchObject({ name: 'AbortError' });
     });
   });
 });

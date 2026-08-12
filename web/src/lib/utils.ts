@@ -295,6 +295,49 @@ export const downloadUrl = (url: string, filename: string) => {
 
 export const downloadBlob = (data: Blob, filename: string) => downloadUrl(URL.createObjectURL(data), filename);
 
+let canShareFilesCache: boolean | undefined;
+
+/**
+ * Whether the browser can hand files to the operating system's share sheet.
+ *
+ * On iOS this is the only route from the web into the photo library: a plain download stores the
+ * file in Files, while the share sheet offers "Save Image". Probing takes an empty file because
+ * `canShare` inspects the file type rather than its contents.
+ */
+export const canShareFiles = () => {
+  if (canShareFilesCache === undefined) {
+    try {
+      canShareFilesCache =
+        typeof navigator !== 'undefined' &&
+        !!navigator.canShare &&
+        navigator.canShare({ files: [new File([], 'probe.jpg', { type: 'image/jpeg' })] });
+    } catch {
+      canShareFilesCache = false;
+    }
+  }
+
+  return canShareFilesCache;
+};
+
+/** Downloads a file into memory and passes it to the share sheet. */
+export const shareFile = async (url: string, filename: string) => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${filename}: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const file = new File([blob], filename, { type: blob.type });
+
+  // re-check with the real file, since the probe only covered the type
+  if (!navigator.canShare({ files: [file] })) {
+    return false;
+  }
+
+  await navigator.share({ files: [file] });
+  return true;
+};
+
 export const downloadJson = (data: unknown, filename: string) => {
   const blob = new Blob([JSON.stringify(data, jsonReplacer, 2)], { type: 'application/json' });
   const downloadKey = filename;
